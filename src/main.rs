@@ -1,5 +1,5 @@
 use ratatui::{
-    DefaultTerminal, Frame, crossterm::event::{self, Event, KeyCode, KeyEventKind}, layout::{Constraint, Layout, Position}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span, Text}, widgets::{Block, List, ListItem, Paragraph}
+    DefaultTerminal, Frame, crossterm::{event::{self, Event, KeyCode, KeyEventKind}, terminal::{disable_raw_mode, enable_raw_mode}}, layout::{Constraint, Layout, Position}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span, Text}, widgets::{Block, List, ListItem, Paragraph}
 };
 use color_eyre::Result;
 
@@ -9,8 +9,12 @@ use crate::message::Message;
 mod message;
 
 fn main() -> Result<()> {
+    enable_raw_mode()?;
+
     let window = ratatui::init();
     let res = App::new().run(window);
+
+    disable_raw_mode()?;
     res
 }
 
@@ -42,11 +46,11 @@ impl App {
     fn draw(&self, frame: &mut Frame) {
         let vertical = Layout::vertical([
             Constraint::Length(1),
+            Constraint::Min(1),
             Constraint::Length(3),
-            Constraint::Min(1)
         ]);
 
-        let [tooltip_area, input_area, messages_area] = vertical.areas(frame.area());
+        let [tooltip_area, messages_area, input_area] = vertical.areas(frame.area());
         
 
         /* render the tooltip */
@@ -88,7 +92,7 @@ impl App {
                 InputMode::Normal => Style::default(),
                 InputMode::Messaging => Style::default().fg(Color::Yellow),
             })
-            .block(Block::bordered().title(format!("Message #{}", self.active_channel)));
+            .block(Block::bordered().title(format!("Message #{} ", self.active_channel)));
         frame.render_widget(input, input_area);
 
         /* render the cursor if editing */
@@ -115,15 +119,76 @@ impl App {
             .collect();
 
         let messages = List::new(messages).block(Block::bordered()
-            .title(format!("#{}", self.active_channel)));
+            .title(format!("#{} ", self.active_channel)));
 
         frame.render_widget(messages, messages_area);
 
 
 
     }
-       
+    
+    fn enter_char(&mut self, new_char: char) {
+        let index = self.byte_index();
+        self.message_input.insert(index, new_char);
+        self.move_cursor_right();
+    }
+
+    fn byte_index(&self) -> usize {
+        self.message_input
+            .char_indices()
+            .map(|(i, _)| i)
+            .nth(self.cursor_index)
+            .unwrap_or(self.message_input.len())
+    }
+
+    fn move_cursor_left(&mut self) {
+        let cursor_moved_left = self.cursor_index.saturating_sub(1);
+        self.cursor_index = self.clamp_cursor(cursor_moved_left);
+    }
+
+    fn move_cursor_right(&mut self) {
+        let cursor_moved_right = self.cursor_index.saturating_add(1);
+        self.cursor_index = self.clamp_cursor(cursor_moved_right);
+    }
+
+    fn delete_char(&mut self) {
+        let is_not_cursor_leftmost = self.cursor_index != 0;
+        if is_not_cursor_leftmost {
+            // Method "remove" is not used on the saved text for deleting the selected char.
+            // Reason: Using remove on String works on bytes instead of the chars.
+            // Using remove would require special care because of char boundaries.
+
+            let current_index = self.cursor_index;
+            let from_left_to_current_index = current_index - 1;
+
+            let before_char_to_delete = self.message_input.chars().take(from_left_to_current_index);
+            let after_char_to_delete = self.message_input.chars().skip(current_index);
+
+            self.message_input = before_char_to_delete.chain(after_char_to_delete).collect();
+            self.move_cursor_left();
+        }
+    }
+    
+    fn reset_cursor(&mut self) {
+        self.cursor_index = 0;
+    }
+    
+    fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
+        new_cursor_pos.clamp(0, self.message_input.chars().count())
+    }
+
+    fn submit_message(&mut self) {
+        // self.messages.push(self.message_input.clone());
+        self.message_input.clear();
+        self.reset_cursor();
+    }
+
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
+        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
+        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
+        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
+
         loop {
             terminal.draw(|frame| self.draw(frame))?;
 
@@ -139,11 +204,11 @@ impl App {
                         _ => {}
                     },
                     InputMode::Messaging if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Enter => todo!(), // submit message
-                        KeyCode::Char(to_insert) => todo!(), // append character to message
-                        KeyCode::Backspace => todo!(), // delete the last character
-                        KeyCode::Left => todo!(), // move cursor left
-                        KeyCode::Right => todo!(), // move cursor right
+                        KeyCode::Enter => self.submit_message(), // submit message
+                        KeyCode::Char(to_insert) => self.enter_char(to_insert), // append character to message
+                        KeyCode::Backspace => self.delete_char(), // delete the last character
+                        KeyCode::Left => self.move_cursor_left(), // move cursor left
+                        KeyCode::Right => self.move_cursor_right(), // move cursor right
                         KeyCode::Esc => self.input_mode = InputMode::Normal,
                         _ => {}
                     },
