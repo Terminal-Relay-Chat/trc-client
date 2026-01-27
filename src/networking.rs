@@ -9,6 +9,7 @@ async fn handle_sock() {
 
 }
 
+
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenFetchResponse {
     error: bool,
@@ -57,4 +58,17 @@ pub fn sock_url<'a>(base_ip: &String, secure: &bool) -> String {
     
     format!("{}://{}/", prefix, base_ip)
 
+}
+
+
+pub async fn send_message(token: String, message: String, channel: &str, base_ip: &String, secure: &bool) {
+    let target = api_url(base_ip, secure, &format!("messages/{}", channel));
+    let client =  reqwest::Client::new();
+    client.post(target)
+        .body(message)
+        .header("x-auth-token", token)
+        .send()
+        .await
+        .unwrap(); // ok to call unwrap because if this fails, there is something wrong with a
+                   // variety of things.
 }

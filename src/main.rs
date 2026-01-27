@@ -20,7 +20,10 @@ async fn main() -> Result<()> {
         Some(content) => match content.to_lowercase().trim() {
             "false" => false,
             "true" => true,
-            _ => panic!("2nd argument is if the api is secure or not. found an unexpected answer.")
+            _ => {
+                print!("Arg #2 is expected to be a boolean value indicating whether the API is secure or not");
+                std::process::exit(1);
+            }
         },
         None => true, // default to a secure api
     };
@@ -44,7 +47,9 @@ struct App {
     input_mode: InputMode,
     messages: Arc<Mutex<Vec<Message>>>,
     active_channel: String,
-    api_token: Option<String>
+    api_token: Option<String>,
+    base_ip: String, // the ip for the server excluding https or wss
+    secure_server: bool
 }
 
 impl App {
@@ -55,7 +60,9 @@ impl App {
             messages: Arc::new(Mutex::new(Vec::new())),
             cursor_index: 0,
             active_channel: String::from("general"),
-            api_token: None
+            api_token: None,
+            base_ip: String::new(),
+            secure_server: true
         }
     }
 
@@ -192,16 +199,27 @@ impl App {
         new_cursor_pos.clamp(0, self.message_input.chars().count())
     }
 
-    fn submit_message(&mut self) {
-        // self.messages.push(self.message_input.clone());
+    async fn submit_message(&mut self) {
+
+        networking::send_message(
+            self.api_token.clone().unwrap(),
+            self.message_input.clone(),
+            &self.active_channel,
+            &self.base_ip,
+            &self.secure_server
+        ).await;
+
         self.message_input.clear();
         self.reset_cursor();
     }
 
     async fn run(mut self, mut terminal: DefaultTerminal, target_ip: String, secure: bool) -> Result<()> {
+        self.base_ip = target_ip.clone();
+        self.secure_server = secure;
         print!("connecting to server...");
         let token = networking::get_token(&target_ip, &secure).await;
-
+        self.api_token = Some(token.clone());
+    
         self.messages.lock().await.push(Message { sender: String::new(), content: token });
         tokio::spawn(async {
             
@@ -223,7 +241,7 @@ impl App {
                         _ => {}
                     },
                     InputMode::Messaging if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Enter => self.submit_message(), // submit message
+                        KeyCode::Enter => self.submit_message().await, // submit message
                         KeyCode::Char(to_insert) => self.enter_char(to_insert), // append character to message
                         KeyCode::Backspace => self.delete_char(), // delete the last character
                         KeyCode::Left => self.move_cursor_left(), // move cursor left
