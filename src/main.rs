@@ -2,17 +2,31 @@ use ratatui::{
     DefaultTerminal, Frame, crossterm::{event::{self, Event, KeyCode, KeyEventKind}, terminal::{disable_raw_mode, enable_raw_mode}}, layout::{Constraint, Layout, Position}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span, Text}, widgets::{Block, List, ListItem, Paragraph}
 };
 use color_eyre::Result;
+use tokio::sync::Mutex;
+use std::sync::Arc;
 
 
 use crate::message::Message;
 
 mod message;
+mod networking;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     enable_raw_mode()?;
 
+    let target_ip: String = std::env::args().nth(1).expect("Can't call this binary without a target ip address");
+    let secure_url: bool = match std::env::args().nth(2) {
+        Some(content) => match content.to_lowercase().trim() {
+            "false" => false,
+            "true" => true,
+            _ => panic!("2nd argument is if the api is secure or not. found an unexpected answer.")
+        },
+        None => true, // default to a secure api
+    };
+
     let window = ratatui::init();
-    let res = App::new().run(window);
+    let res = App::new().run(window, target_ip, secure_url).await;
 
     disable_raw_mode()?;
     res
@@ -28,22 +42,24 @@ struct App {
     message_input: String,
     cursor_index: usize,
     input_mode: InputMode,
-    messages: Vec<Message>,
-    active_channel: String
+    messages: Arc<Mutex<Vec<Message>>>,
+    active_channel: String,
+    api_token: Option<String>
 }
 
 impl App {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             message_input: String::new(),
             input_mode: InputMode::Normal,
-            messages: Vec::new(),
+            messages: Arc::new(Mutex::new(Vec::new())),
             cursor_index: 0,
-            active_channel: String::new()
+            active_channel: String::from("general"),
+            api_token: None
         }
     }
 
-    fn draw(&self, frame: &mut Frame) {
+    fn draw(&self, frame: &mut Frame, messages_snapshot: Vec<Message>) {
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(1),
@@ -108,8 +124,7 @@ impl App {
         
 
         /* render the messages */
-        let messages: Vec<ListItem> = self
-            .messages
+        let messages: Vec<ListItem> = messages_snapshot
             .iter()
             .enumerate()
             .map(|(i, m)| {
@@ -183,14 +198,18 @@ impl App {
         self.reset_cursor();
     }
 
-    fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
-        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
-        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
-        self.messages.push(Message { sender: "".to_string(), content: "Hello world".to_string() });
+    async fn run(mut self, mut terminal: DefaultTerminal, target_ip: String, secure: bool) -> Result<()> {
+        print!("connecting to server...");
+        let token = networking::get_token(&target_ip, &secure).await;
+
+        self.messages.lock().await.push(Message { sender: String::new(), content: token });
+        tokio::spawn(async {
+            
+        });
 
         loop {
-            terminal.draw(|frame| self.draw(frame))?;
+            let messages_snapshot = self.messages.lock().await.clone();
+            terminal.draw(|frame| self.draw(frame, messages_snapshot))?;
 
             if let Event::Key(key) = event::read()? {
                 match self.input_mode {
