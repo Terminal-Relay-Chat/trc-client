@@ -4,12 +4,15 @@ use ratatui::{
 use color_eyre::Result;
 use tokio::sync::Mutex;
 use std::sync::Arc;
+use networking::{SocketMessage, UpdateType, User, UserMode, UserPermissions};
 
 
 use crate::message::Message;
 
 mod message;
 mod networking;
+
+pub const MAX_DISPLAYNAME_CHARS: usize = 11;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,7 +48,7 @@ struct App {
     message_input: String,
     cursor_index: usize,
     input_mode: InputMode,
-    messages: Arc<Mutex<Vec<Message>>>,
+    messages: Arc<Mutex<Vec<SocketMessage>>>,
     active_channel: String,
     api_token: Option<String>,
     base_ip: String, // the ip for the server excluding https or wss
@@ -66,7 +69,7 @@ impl App {
         }
     }
 
-    fn draw(&self, frame: &mut Frame, messages_snapshot: Vec<Message>) {
+    fn draw(&self, frame: &mut Frame, messages_snapshot: Vec<SocketMessage>) {
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(1),
@@ -134,8 +137,31 @@ impl App {
         let messages: Vec<ListItem> = messages_snapshot
             .iter()
             .enumerate()
-            .map(|(i, m)| {
-                let content = Line::from(Span::raw(format!("{i}: {}", m.content)));
+            .map(|(_, m)| {
+                let sender = match m.sender.clone() {
+                    Some(inner) => inner,
+                    None => User {
+                        user_type: UserMode::User,
+                        permission_level: UserPermissions::User,
+                        username: "Unknown (error)".to_string(),
+                        handle: "N/A (error)".to_string(),
+                        provider_site: None,
+                        banned: false 
+                    },
+                };
+                
+                let displayname = {
+                    let chosenname = String::from(sender.handle); // in case we switch to using the "username" again in the future
+                    if chosenname.chars().count() > MAX_DISPLAYNAME_CHARS {
+                        let mut tmp_string = chosenname.chars().take(MAX_DISPLAYNAME_CHARS - 3).collect::<String>();
+                        tmp_string.push_str("...");
+                        tmp_string
+                    } else {
+                        chosenname
+                    }
+                 };
+
+                let content = Line::from(Span::raw(format!("{}: {}", displayname, m.content)));
                 ListItem::new(content)
             })
             .collect();

@@ -10,32 +10,74 @@ use tokio::net::{TcpStream};
 use std::sync::Arc;
 use tokio::select;
 use futures_util::stream::SplitStream;
-use super::Message;
 
-pub async fn do_socket_connection(base_ip: &String, secure: &bool, token: &String, messages: Arc<Mutex<Vec<Message>>>) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[allow(dead_code)]
+pub enum UpdateType {
+    MESSAGE,
+    SYSTEM, // SYSTEM is for commands or responses to requests from a client
+    ERROR,
+}
+#[derive(Serialize, Debug, Deserialize, Clone)]
+pub struct SocketMessage {
+    pub message_type: UpdateType,
+    pub content: String,
+    pub sender: Option<User>
+}
+
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub enum UserMode {
+    User,
+    Bot
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub enum UserPermissions {
+    User, // basic things: join channels, read/write to those channels
+    Moderator, // `/kick` people, `/ban` people of lower ranks
+    Admin, // highest permission. Assumed owner or extremely trusted member 
+}
+
+/// the publicly available information for a given user that should be stored in state
+/// password is only used in the login process
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)] // PartialEq for testing convinience.
+                                                           // See token.rs tests if you change
+                                                           // this.
+pub struct User {
+    pub user_type: UserMode,
+    pub permission_level: UserPermissions,
+    pub username: String,
+    pub handle: String,
+    pub provider_site: Option<String>, // this is so people can know how to DM them
+    pub banned: bool, // for while the user is stored in memory
+}
+
+
+pub async fn do_socket_connection(base_ip: &String, secure: &bool, token: &String, messages: Arc<Mutex<Vec<SocketMessage>>>) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     let target_url = sock_url(base_ip, secure);
     let (mut ws_stream, _) = tokio_tungstenite::connect_async(&target_url).await.expect(&format!("Failed to connect to: {}", target_url));
+    let (tx, rx) = ws_stream.split();
+    let (tx, rx) = (Arc::new(Mutex::new(tx)), Arc::new(Mutex::new(rx)));
 
     /* authenticate */
 
     // the first request is assumed to be the token
-    ws_stream.send(tungstenite::Message::Text(token.into())).await?;
+    tx.lock().await.send(tungstenite::Message::Text(token.into())).await?;
 
     // if authentication is failed the socket will close, otherwise we will recieve a message in
     // text
-    if let Some(Ok(tungstenite::Message::Text(_good_response))) = ws_stream.next().await {
+    if let Some(Ok(tungstenite::Message::Text(_good_response))) = rx.lock().await.next().await {
         print!("successfully connected to websocket");
     } else {
         panic!("unable to authenticate with websocket");
     }
 
     //TODO replace this with the handle_sock_send() fn
-    ws_stream.send(tungstenite::Message::Text("general".into())).await?;   
+    tx.lock().await.send(tungstenite::Message::Text("general".into())).await?;   
 
     /* handle socket */
-    let (tx, rx) = ws_stream.split();
-    let (tx, rx) = (Arc::new(Mutex::new(tx)), Arc::new(Mutex::new(rx)));
-
+    
     select! {
         res = handle_sock_recv(rx, messages) => {},
         // res = handle_sock_send() => {},
@@ -45,17 +87,40 @@ pub async fn do_socket_connection(base_ip: &String, secure: &bool, token: &Strin
     std::process::exit(0);
 }
 
+/// The skeleton for a socket update. This is used to differentiate between MESSAGE updates and
+/// other types.
+#[derive(Debug, Serialize, Deserialize)]
+struct RawSocketUpdate {
+    pub message_type: UpdateType,
+}
+
+
 async fn handle_sock_send() {}
-async fn handle_sock_recv(ws: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>, messages: Arc<Mutex<Vec<Message>>>) -> Result<(), Box<dyn Error>> {
+async fn handle_sock_recv(ws: Arc<Mutex<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>, messages: Arc<Mutex<Vec<SocketMessage>>>) -> Result<(), Box<dyn Error>> {
     while let Some(msg) = ws.lock().await.next().await {
         match msg? {
             tungstenite::Message::Text(raw) => {
-                messages.lock().await.push(Message { sender: String::new(), content: raw.to_string() });
+                let rawsockupdate: RawSocketUpdate = serde_json::from_str(&raw.as_str())?;
+
+                match rawsockupdate.message_type {
+                    UpdateType::MESSAGE => {
+                        let deserialized: SocketMessage = serde_json::from_str(&raw)?;
+                        messages.lock().await.push(deserialized);
+                    },
+                    UpdateType::ERROR => {
+                        //TODO
+                        panic!("hit an error from the server")
+                    },
+                    UpdateType::SYSTEM => {
+                        //TODO things like switching channels
+                    }
+                }
+
             },
             _ => {}
         }
     }
-
+    print!("bork");
     Ok(())
 }
 
