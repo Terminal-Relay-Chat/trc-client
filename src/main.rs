@@ -219,12 +219,11 @@ impl App {
         print!("connecting to server...");
         let token = networking::get_token(&target_ip, &secure).await;
         self.api_token = Some(token.clone());
-    
-        self.messages.lock().await.push(Message { sender: String::new(), content: token });
-        tokio::spawn(async {
-            
+        
+        let socket_messages_clone = self.messages.clone();
+        tokio::spawn(async move {
+            networking::do_socket_connection(&target_ip, &secure, &token, socket_messages_clone).await
         });
-
         loop {
             let messages_snapshot = self.messages.lock().await.clone();
             terminal.draw(|frame| self.draw(frame, messages_snapshot))?;
