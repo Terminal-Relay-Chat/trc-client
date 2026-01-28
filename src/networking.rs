@@ -148,8 +148,8 @@ pub async fn get_token(base_ip: &String, secure: &bool) -> String {
 
     //TODO: use real credentials and not test ones
     let body = {
-        let login_config = fs::read_to_string(LOGIN_LOCATION).unwrap();
-        let _validation = serde_json::from_str::<Login>(&login_config).unwrap();
+        let login_config = fs::read_to_string(LOGIN_LOCATION).expect("needed a config file");
+        let _validation = serde_json::from_str::<Login>(&login_config).expect("invalid login");
         login_config
     };
 
