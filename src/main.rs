@@ -38,7 +38,8 @@ async fn main() -> Result<()> {
 
     let window = ratatui::init();
     let res = App::new().run(window, target_ip, secure_url).await;
-
+    
+    ratatui::restore();
     res
 }
 
