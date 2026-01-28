@@ -56,7 +56,7 @@ pub struct User {
 
 pub async fn do_socket_connection(base_ip: &String, secure: &bool, token: &String, messages: Arc<Mutex<Vec<SocketMessage>>>) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     let target_url = sock_url(base_ip, secure);
-    let (mut ws_stream, _) = tokio_tungstenite::connect_async(&target_url).await.expect(&format!("Failed to connect to: {}", target_url));
+    let (ws_stream, _) = tokio_tungstenite::connect_async(&target_url).await.expect(&format!("Failed to connect to: {}", target_url));
     let (tx, rx) = ws_stream.split();
     let (tx, rx) = (Arc::new(Mutex::new(tx)), Arc::new(Mutex::new(rx)));
 
@@ -79,8 +79,8 @@ pub async fn do_socket_connection(base_ip: &String, secure: &bool, token: &Strin
     /* handle socket */
     
     select! {
-        res = handle_sock_recv(rx, messages) => {},
-        // res = handle_sock_send() => {},
+        _res = handle_sock_recv(rx, messages) => {},
+        // res = handle_sock_send() => {}, //TODO
     }
 
     print!("disconnected.");

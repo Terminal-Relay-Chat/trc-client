@@ -1,23 +1,27 @@
 use ratatui::{
-    DefaultTerminal, Frame, crossterm::{event::{self, Event, KeyCode, KeyEventKind}, terminal::{disable_raw_mode, enable_raw_mode}}, layout::{Constraint, Layout, Position}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span, Text}, widgets::{Block, List, ListItem, Paragraph}
+    DefaultTerminal,
+    Frame,
+    crossterm::{event::{self, Event, KeyCode, KeyEventKind}},
+    layout::{Constraint, Layout, Position},
+    style::{Color, Modifier, Style, Stylize},
+    text::{Line, Span, Text},
+    widgets::{Block, List, ListItem, Paragraph},
 };
 use color_eyre::Result;
-use tokio::{sync::Mutex, task::futures};
-use tokio::join;
+use tokio::{sync::Mutex};
 use std::sync::Arc;
-use networking::{SocketMessage, UpdateType, User, UserMode, UserPermissions};
+use networking::{SocketMessage, User, UserMode, UserPermissions};
 
-
-use crate::message::Message;
-
-mod message;
 mod networking;
 
 pub const MAX_DISPLAYNAME_CHARS: usize = 11;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    enable_raw_mode()?;
+    // disable raw mode on panic
+    std::panic::set_hook(Box::new(|_| {
+        ratatui::restore();
+    }));
 
     let target_ip: String = std::env::args().nth(1).expect("Can't call this binary without a target ip address");
     let secure_url: bool = match std::env::args().nth(2) {
@@ -35,7 +39,6 @@ async fn main() -> Result<()> {
     let window = ratatui::init();
     let res = App::new().run(window, target_ip, secure_url).await;
 
-    disable_raw_mode()?;
     res
 }
 
@@ -292,32 +295,12 @@ impl App {
                 lock.draw(frame, messages_snapshot);
             }).unwrap();
         }
-                
-//        loop {
-//            if let Event::Key(key) = event::read()? {
-//                let mut lock = other_self.lock().await;
-//                match lock.input_mode {
-//                    InputMode::Normal => match key.code {
-//                        KeyCode::Char('i') => {
-//                            lock.input_mode = InputMode::Messaging;
-//                        },
-//                        KeyCode::Char('q') => {
-//                            return Ok(());
-//                        },
-//                        _ => {}
-//                    },
-//                    InputMode::Messaging if key.kind == KeyEventKind::Press => match key.code {
-//                        KeyCode::Enter => lock.submit_message().await, // submit message
-//                        KeyCode::Char(to_insert) => lock.enter_char(to_insert), // append character to message
-//                        KeyCode::Backspace => lock.delete_char(), // delete the last character
-//                        KeyCode::Left => lock.move_cursor_left(), // move cursor left
-//                        KeyCode::Right => lock.move_cursor_right(), // move cursor right
-//                        KeyCode::Esc => lock.input_mode = InputMode::Normal,
-//                        _ => {}
-//                    },
-//                    _ => {}
-//                }
-//            }
-//        }
+    }
+}
+
+// prevent terminal from borking on exit
+impl Drop for App {
+    fn drop(&mut self) {
+        ratatui::restore();
     }
 }
