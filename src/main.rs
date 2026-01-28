@@ -2,7 +2,8 @@ use ratatui::{
     DefaultTerminal, Frame, crossterm::{event::{self, Event, KeyCode, KeyEventKind}, terminal::{disable_raw_mode, enable_raw_mode}}, layout::{Constraint, Layout, Position}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span, Text}, widgets::{Block, List, ListItem, Paragraph}
 };
 use color_eyre::Result;
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, task::futures};
+use tokio::join;
 use std::sync::Arc;
 use networking::{SocketMessage, UpdateType, User, UserMode, UserPermissions};
 
@@ -250,33 +251,73 @@ impl App {
         tokio::spawn(async move {
             networking::do_socket_connection(&target_ip, &secure, &token, socket_messages_clone).await
         });
-        loop {
-            let messages_snapshot = self.messages.lock().await.clone();
-            terminal.draw(|frame| self.draw(frame, messages_snapshot))?;
-
-            if let Event::Key(key) = event::read()? {
-                match self.input_mode {
-                    InputMode::Normal => match key.code {
-                        KeyCode::Char('i') => {
-                            self.input_mode = InputMode::Messaging;
+        
+        let self_arc = Arc::new(Mutex::new(self));
+        let other_self = self_arc.clone();
+        
+        tokio::task::spawn(async move {
+            loop {
+                if let Event::Key(key) = event::read().unwrap() {
+                    let mut lock = other_self.lock().await;
+                    match lock.input_mode {
+                        InputMode::Normal => match key.code {
+                            KeyCode::Char('i') => {
+                                lock.input_mode = InputMode::Messaging;
+                            },
+                            KeyCode::Char('q') => {
+                                print!("quitting...");
+                                std::process::exit(0);
+                            },
+                            _ => {}
                         },
-                        KeyCode::Char('q') => {
-                            return Ok(());
+                        InputMode::Messaging if key.kind == KeyEventKind::Press => match key.code {
+                            KeyCode::Enter => lock.submit_message().await, // submit message
+                            KeyCode::Char(to_insert) => lock.enter_char(to_insert), // append character to message
+                            KeyCode::Backspace => lock.delete_char(), // delete the last character
+                            KeyCode::Left => lock.move_cursor_left(), // move cursor left
+                            KeyCode::Right => lock.move_cursor_right(), // move cursor right
+                            KeyCode::Esc => lock.input_mode = InputMode::Normal,
+                            _ => {}
                         },
                         _ => {}
-                    },
-                    InputMode::Messaging if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Enter => self.submit_message().await, // submit message
-                        KeyCode::Char(to_insert) => self.enter_char(to_insert), // append character to message
-                        KeyCode::Backspace => self.delete_char(), // delete the last character
-                        KeyCode::Left => self.move_cursor_left(), // move cursor left
-                        KeyCode::Right => self.move_cursor_right(), // move cursor right
-                        KeyCode::Esc => self.input_mode = InputMode::Normal,
-                        _ => {}
-                    },
-                    _ => {}
+                    }
                 }
             }
+        });
+
+        loop {
+            let lock = self_arc.lock().await;
+            let messages_snapshot = lock.messages.lock().await.clone();
+            terminal.draw(|frame| {
+                lock.draw(frame, messages_snapshot);
+            }).unwrap();
         }
+                
+//        loop {
+//            if let Event::Key(key) = event::read()? {
+//                let mut lock = other_self.lock().await;
+//                match lock.input_mode {
+//                    InputMode::Normal => match key.code {
+//                        KeyCode::Char('i') => {
+//                            lock.input_mode = InputMode::Messaging;
+//                        },
+//                        KeyCode::Char('q') => {
+//                            return Ok(());
+//                        },
+//                        _ => {}
+//                    },
+//                    InputMode::Messaging if key.kind == KeyEventKind::Press => match key.code {
+//                        KeyCode::Enter => lock.submit_message().await, // submit message
+//                        KeyCode::Char(to_insert) => lock.enter_char(to_insert), // append character to message
+//                        KeyCode::Backspace => lock.delete_char(), // delete the last character
+//                        KeyCode::Left => lock.move_cursor_left(), // move cursor left
+//                        KeyCode::Right => lock.move_cursor_right(), // move cursor right
+//                        KeyCode::Esc => lock.input_mode = InputMode::Normal,
+//                        _ => {}
+//                    },
+//                    _ => {}
+//                }
+//            }
+//        }
     }
 }
