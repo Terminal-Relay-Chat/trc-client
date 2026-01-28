@@ -2475,7 +2475,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "trc-client"
+name = "trc"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
