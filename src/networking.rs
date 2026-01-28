@@ -11,6 +11,9 @@ use std::sync::Arc;
 use tokio::select;
 use futures_util::stream::SplitStream;
 
+const LOGIN_LOCATION: &'static str = "~/.trclogin";
+
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[allow(dead_code)]
 pub enum UpdateType {
@@ -131,15 +134,24 @@ struct TokenFetchResponse {
     value: String
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Login {
+    handle: String,
+    password: String
+}
+
 pub async fn get_token(base_ip: &String, secure: &bool) -> String {
+    use std::fs;
+
     let target = api_url(base_ip, secure, "login");
     let client = reqwest::Client::new();
 
     //TODO: use real credentials and not test ones
-    let body = json!({
-        "handle": "test",
-        "password": "test"
-    });
+    let body = {
+        let login_config = fs::read_to_string(LOGIN_LOCATION).unwrap();
+        let _validation = serde_json::from_str::<Login>(&login_config).unwrap();
+        login_config
+    };
 
     let res: TokenFetchResponse = client.post(target).json(&body)
         .send().await.unwrap()
