@@ -1,7 +1,5 @@
 use std::error::Error;
-
 use futures_util::{SinkExt, StreamExt};
-use serde_json::json;
 use serde::{Serialize, Deserialize};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::{self};
@@ -11,7 +9,15 @@ use std::sync::Arc;
 use tokio::select;
 use futures_util::stream::SplitStream;
 
-const LOGIN_LOCATION: &'static str = "~/.trclogin";
+
+fn trclogin_path() -> String {
+    dirs::home_dir()
+        .unwrap()
+        .join(".trclogin")
+        .to_str()
+        .unwrap()
+        .to_string()
+}
 
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -148,9 +154,24 @@ pub async fn get_token(base_ip: &String, secure: &bool) -> String {
 
     //TODO: use real credentials and not test ones
     let body = {
-        let login_config = fs::read_to_string(LOGIN_LOCATION).expect("needed a config file");
-        let _validation = serde_json::from_str::<Login>(&login_config).expect("invalid login");
-        login_config
+
+        // try to read the login file
+        let login_config = match fs::read_to_string(trclogin_path()) {
+            Ok(inner) => inner,
+            Err(e) => {
+                eprintln!("Error reading login file. It is expected to be stored as ~/.trclogin. Message: {:?}", e);
+                panic!();
+            }
+        };
+        
+        // try to deserialize it
+        match serde_json::from_str::<Login>(&login_config) {
+            Ok(inner) => inner,
+            Err(_) => {
+                eprintln!("Error deserialzing the login file, maybe it was formatted wrong?");
+                panic!();
+            }
+        }
     };
 
     let res: TokenFetchResponse = client.post(target).json(&body)
@@ -173,6 +194,10 @@ pub fn api_url(base_ip: &String, secure: &bool, path: &str) -> String {
         false => "http"
     };
     
+    if path.is_empty() {
+        return format!("{}://{}:3000/api", prefix, base_ip);
+    }
+
     format!("{}://{}:3000/api/{}", prefix, base_ip, path)
 }
 
@@ -183,7 +208,7 @@ pub fn sock_url<'a>(base_ip: &String, secure: &bool) -> String {
         false => "ws"
     };
     
-    format!("{}://{}:3001/", prefix, base_ip)
+    format!("{}://{}:3001", prefix, base_ip)
 
 }
 

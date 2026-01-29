@@ -9,7 +9,7 @@ use ratatui::{
 };
 use color_eyre::Result;
 use tokio::{sync::Mutex};
-use std::sync::Arc;
+use std::{sync::Arc};
 use networking::{SocketMessage, User, UserMode, UserPermissions};
 
 mod networking;
